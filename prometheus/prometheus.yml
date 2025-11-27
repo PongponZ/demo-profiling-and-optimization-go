@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'worker-bad'
+    static_configs:
+      - targets: ['worker-bad:9090']
+        labels:
+          worker_type: 'bad'
+
+  - job_name: 'worker-optimized'
+    static_configs:
+      - targets: ['worker-optimized:9091']
+        labels:
+          worker_type: 'optimized'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9092']
+

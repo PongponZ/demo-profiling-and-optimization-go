@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>คู่มือ Pprof และ Flame Graph</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Cool & Calm (Slate, Sky Blue, White) -->
+    <!-- Application Structure Plan: ออกแบบเป็น Single-Page Application (SPA) ที่มีโครงสร้างแบบคู่มือ/เอกสาร (Docs) โดยมีแถบนำทางด้านข้าง (Sticky Sidebar) สำหรับการเข้าถึงหัวข้อต่างๆ อย่างรวดเร็ว (เช่น 'บทนำ', 'การติดตั้ง', 'วิธีอ่าน Flame Graph', 'เดโม') และส่วนเนื้อหาหลักทางด้านขวา โครงสร้างนี้ถูกเลือกเพราะผู้ใช้คุ้นเคยและใช้งานง่ายสำหรับการเรียนรู้ทีละขั้นตอน ส่วนที่สำคัญที่สุดคือ 'เดโมแบบโต้ตอบ' (Interactive Demo) ซึ่งผู้ใช้สามารถคลิกที่ส่วนต่างๆ ของ Flame Graph ที่จำลองขึ้น (สร้างจาก HTML/CSS) เพื่อดูคำอธิบาย ซึ่งจะช่วยเชื่อมโยงทฤษฎีกับการปฏิบัติและทำให้เข้าใจง่ายกว่าการอ่านข้อความเพียงอย่างเดียว -->
+    <!-- Visualization & Content Choices:
+    - Report Info: "pprof คืออะไร", "Flame Graph คืออะไร" -> Goal: Inform -> Viz/Method: Structured Text -> Interaction: None -> Justification: ให้ความรู้พื้นฐานที่ชัดเจน (HTML/Tailwind)
+    - Report Info: "การติดตั้ง pprof" -> Goal: Instruct -> Viz/Method: Code Blocks -> Interaction: Copy-to-Clipboard Button -> Justification: ให้ผู้ใช้คัดลอกโค้ดไปใช้งานได้สะดวก (HTML/Tailwind/JS)
+    - Report Info: "วิธีอ่าน Flame Graph" (แกน X, แกน Y, ความกว้าง) -> Goal: Educate (Complex Concept) -> Viz/Method: Simulated Interactive Flame Graph (สร้างจาก HTML/CSS/Tailwind divs) -> Interaction: Click on graph blocks (divs) -> Justification: การสร้างภาพจำลองที่โต้ตอบได้เป็นวิธีที่ดีที่สุดในการสอนแนวคิดเรื่อง "ความกว้าง" และ "stack" โดยไม่ต้องใช้รูปภาพหรือ SVG ทำให้ผู้ใช้สามารถเรียนรู้ผ่านการลงมือทำ (HTML/Tailwind/JS)
+    - Report Info: "คำสั่ง pprof ที่ใช้บ่อย" -> Goal: Reference -> Viz/Method: List/Cheatsheet -> Interaction: None -> Justification: สรุปคำสั่งไว้สำหรับอ้างอิงได้ง่าย (HTML/Tailwind)
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f8fafc; /* bg-slate-50 */
+        }
+        .code-snippet {
+            position: relative;
+            background-color: #1e293b; /* bg-slate-800 */
+            color: #e2e8f0; /* bg-slate-200 */
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+        }
+        .copy-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background-color: #334155; /* bg-slate-700 */
+            color: #94a3b8; /* bg-slate-400 */
+            border: none;
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .copy-btn:hover {
+            background-color: #475569; /* bg-slate-600 */
+        }
+        .copy-btn.copied {
+            background-color: #16a34a; /* bg-green-600 */
+            color: white;
+        }
+        .flame-block {
+            border: 1px solid #64748b; /* border-slate-500 */
+            transition: all 0.2s;
+            cursor: pointer;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            font-size: 0.75rem;
+            line-height: 1.75rem; /* h-7 */
+            padding: 0 0.5rem;
+            color: #1e293b;
+        }
+        .flame-block:hover {
+            filter: brightness(1.1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .flame-block.active {
+            outline: 3px solid #0284c7; /* ring-sky-600 */
+            z-index: 10;
+            transform: scale(1.02);
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <div class="container mx-auto max-w-7xl p-4">
+        <header class="mb-10 p-6 bg-white rounded-xl shadow-md">
+            <h1 class="text-4xl font-bold text-sky-700">คู่มือ Pprof และ Flame Graph ฉบับสมบูรณ์</h1>
+            <p class="text-lg text-slate-600 mt-2">เรียนรู้วิธีค้นหาและแก้ไขปัญหาคอขวด (Bottlenecks) ในแอปพลิเคชัน Go ของคุณ</p>
+        </header>
+
+        <div class="flex flex-col md:flex-row gap-8">
+
+            <!-- Mobile Navigation -->
+            <div class="md:hidden mb-6">
+                <label for="nav-select" class="block text-sm font-medium text-slate-700 mb-2">ไปที่หัวข้อ:</label>
+                <select id="nav-select" class="w-full rounded-md border-slate-300 shadow-sm focus:border-sky-500 focus:ring-sky-500">
+                    <option value="intro">บทนำ</option>
+                    <option value="setup">การติดตั้งและใช้งาน pprof</option>
+                    <option value="collect">การเก็บข้อมูล Profile</option>
+                    <option value="flamegraph-concept">Flame Graph คืออะไร?</option>
+                    <option value="flamegraph-demo">เดโม: ลองอ่าน Flame Graph</option>
+                    <option value="commands">คำสั่ง pprof ที่ใช้บ่อย</option>
+                    <option value="summary">สรุป</option>
+                </select>
+            </div>
+
+            <!-- Sidebar Navigation -->
+            <aside class="hidden md:block w-full md:w-1/4 lg:w-1/5 sticky top-8 self-start">
+                <nav class="flex flex-col space-y-2 bg-white p-4 rounded-lg shadow-sm">
+                    <a href="#intro" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">บทนำ</a>
+                    <a href="#setup" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">การติดตั้ง pprof</a>
+                    <a href="#collect" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">การเก็บข้อมูล Profile</a>
+                    <a href="#flamegraph-concept" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">Flame Graph คืออะไร?</a>
+                    <a href="#flamegraph-demo" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">เดโม: ลองอ่าน Flame Graph</a>
+                    <a href="#commands" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">คำสั่งที่ใช้บ่อย</a>
+                    <a href="#summary" class="nav-link text-slate-600 hover:text-sky-600 hover:bg-slate-100 p-2 rounded-md font-medium">สรุป</a>
+                </nav>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="w-full md:w-3/4 lg:w-4/5">
+                
+                <section id="intro" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">บทนำ</h2>
+                    <p class="text-lg mb-4">ในโลกของการพัฒนาซอฟต์แวร์ ประสิทธิภาพ (Performance) คือหัวใจสำคัญ แอปพลิเคชันที่ช้าอาจทำให้ผู้ใช้หงุดหงิดและหนีหายไป Go (Golang) มีเครื่องมือทรงพลังในตัวที่ชื่อว่า <code class="font-mono bg-slate-200 px-1 rounded">pprof</code> ซึ่งช่วยให้นักพัฒนาสามารถ "โปรไฟล์" (Profile) แอปพลิเคชันของตนเพื่อค้นหาว่าส่วนไหนของโค้ดที่ใช้ทรัพยากรมากที่สุด ไม่ว่าจะเป็น CPU หรือหน่วยความจำ</p>
+                    <p class="text-lg">คู่มือนี้จะสอนคุณตั้งแต่การตั้งค่า <code class="font-mono bg-slate-200 px-1 rounded">pprof</code>, การรวบรวมข้อมูล, และที่สำคัญที่สุดคือ วิธีการอ่าน "Flame Graph" ซึ่งเป็นหนึ่งในวิธีแสดงผลข้อมูลโปรไฟล์ที่มีประสิทธิภาพและเข้าใจง่ายที่สุด เพื่อให้คุณสามารถหาคอขวด (Bottleneck) และเพิ่มประสิทธิภาพแอปพลิเคชัน Go ของคุณได้อย่างมืออาชีพ</p>
+                </section>
+
+                <section id="setup" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">การติดตั้งและใช้งาน pprof</h2>
+                    <p class="text-lg mb-4">วิธีที่ง่ายที่สุดในการเปิดใช้งาน <code class="font-mono bg-slate-200 px-1 rounded">pprof</code> ในเว็บเซิร์ฟเวอร์ Go คือการ import แพ็คเกจ <code class="font-mono bg-slate-200 px-1 rounded">net/http/pprof</code> แพ็คเกจนี้จะลงทะเบียน (register) HTTP handlers สำหรับ endpoint ของ <code class="font-mono bg-slate-200 px-1 rounded">/debug/pprof/</code> โดยอัตโนมัติ</p>
+                    <p class="text-lg mb-4">เพียงแค่เพิ่มบรรทัด "blank import" นี้ในฟังก์ชัน <code class="font-mono bg-slate-200 px-1 rounded">main</code> ของคุณ:</p>
+                    <div class="code-snippet mb-4">
+<pre><code>import (
+    "log"
+    "net/http"
+    _ "net/http/pprof" // Blank import
+)
+
+func main() {
+    // โค้ดอื่นๆ ของคุณ...
+    // เช่น การตั้งค่า handler อื่นๆ
+
+    // pprof จะถูกผูกกับ DefaultServeMux
+    // แค่เริ่มเซิร์ฟเวอร์
+    log.Println("Starting server with pprof on :6060")
+    log.Fatal(http.ListenAndServe(":6060", nil))
+}
+</code></pre>
+                    </div>
+                    <p class="text-lg">เมื่อเซิร์ฟเวอร์ของคุณทำงาน คุณสามารถเข้าถึง endpoint ของ pprof ได้ที่ <code class="font-mono bg-slate-200 px-1 rounded">http://localhost:6060/debug/pprof/</code></p>
+                </section>
+
+                <section id="collect" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">การเก็บข้อมูล Profile</h2>
+                    <p class="text-lg mb-4">หลังจากเปิดใช้งาน pprof แล้ว คุณสามารถใช้เครื่องมือ <code class="font-mono bg-slate-200 px-1 rounded">go tool pprof</code> เพื่อรวบรวมและวิเคราะห์ข้อมูลได้ ข้อมูลโปรไฟล์ที่พบบ่อยมีดังนี้:</p>
+                    <ul class="list-disc list-outside text-lg space-y-2 pl-6 mb-4">
+                        <li><strong>CPU Profile (profile):</strong> วิเคราะห์ว่าฟังก์ชันไหนใช้เวลา CPU มากที่สุด (ตัวอย่าง: เก็บข้อมูล 30 วินาที)</li>
+                        <li><strong>Heap Profile (heap):</strong> วิเคราะห์ว่าส่วนไหนของโค้ดที่จัดสรรหน่วยความจำ (Memory Allocation) บน Heap มากที่สุด</li>
+                        <li><strong>Goroutine Profile (goroutine):</strong> แสดง stack traces ของ Goroutine ทั้งหมดที่กำลังทำงานอยู่</li>
+                        <li><strong>Mutex Profile (mutex):</strong> รายงานการแย่งชิง (contention) lock</li>
+                    </ul>
+                    <p class="text-lg mb-4"><strong>ตัวอย่างการเก็บ CPU profile เป็นเวลา 30 วินาที:</strong></p>
+                    <div class="code-snippet mb-4">
+<pre><code># รันใน Terminal
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30</code></pre>
+                    </div>
+                    <p class="text-lg mb-4"><strong>ตัวอย่างการดู Heap profile:</strong></p>
+                    <div class="code-snippet mb-4">
+<pre><code># รันใน Terminal
+go tool pprof http://localhost:6060/debug/pprof/heap</code></pre>
+                    </div>
+                    <p class="text-lg">หลังจากรันคำสั่งเหล่านี้ คุณจะเข้าสู่โหมดโต้ตอบของ pprof ซึ่งคุณสามารถพิมพ์คำสั่ง เช่น <code class="font-mono bg-slate-200 px-1 rounded">top</code>, <code class="font-mono bg-slate-200 px-1 rounded">list</code>, หรือ <code class="font-mono bg-slate-200 px-1 rounded">web</code> เพื่อดูข้อมูลได้</p>
+                </section>
+
+                <section id="flamegraph-concept" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">Flame Graph คืออะไร?</h2>
+                    <p class="text-lg mb-4">Flame Graph คือการแสดงภาพ (Visualization) ข้อมูลโปรไฟล์ (โดยเฉพาะ CPU) ที่ทรงพลังมาก มันช่วยให้เราเห็นภาพรวมของ Call Stacks ทั้งหมดในแอปพลิเคชันของเราได้อย่างรวดเร็ว</p>
+                    <p class="text-lg mb-4">ลองนึกภาพมันเหมือนกองกล่องที่วางซ้อนกัน โดยมีหลักการอ่านง่ายๆ ดังนี้:</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-lg">
+                        <div class="bg-slate-100 p-4 rounded-lg">
+                            <h3 class="font-semibold text-xl text-sky-800 mb-2">1. แกน Y (แนวตั้ง): ลำดับการเรียกฟังก์ชัน (Stack Depth)</h3>
+                            <p>กล่องที่อยู่ล่างสุดคือฟังก์ชันที่เริ่มทำงาน (เช่น <code class="font-mono bg-slate-200 px-1 rounded">main</code>) กล่องที่อยู่ด้านบนคือฟังก์ชันที่ถูกเรียกโดยกล่องที่อยู่ข้างใต้ ยิ่งสูง แสดงว่ายิ่งอยู่ลึกใน Call Stack</p>
+                        </div>
+                        <div class="bg-slate-100 p-4 rounded-lg">
+                            <h3 class="font-semibold text-xl text-sky-800 mb-2">2. แกน X (แนวนอน): สัดส่วนการใช้ทรัพยากร (Population)</h3>
+                            <p><strong>นี่คือส่วนที่สำคัญที่สุด!</strong> ความกว้างของกล่อง (ฟังก์ชัน) เป็นสัดส่วนโดยตรงกับทรัพยากรที่ฟังก์ชันนั้นใช้ (เช่น เวลา CPU) <strong class="text-red-600">กล่องไหนกว้าง แสดงว่าฟังก์ชันนั้นใช้ทรัพยากรมาก</strong></p>
+                        </div>
+                    </div>
+                    <p class="text-lg mt-4"><strong>เป้าหมายของเรา:</strong> คือการมองหากล่องที่ "กว้างและแบน" (Wide Plateaus) ที่อยู่ด้านบนๆ ของกราฟ กล่องเหล่านี้คือฟังก์ชันที่ใช้ CPU มากที่สุดและเป็นจุดที่ควรเริ่มทำการปรับปรุงประสิทธิภาพ</p>
+                </section>
+
+                <section id="flamegraph-demo" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">เดโม: ลองอ่าน Flame Graph</h2>
+                    <p class="text-lg mb-4">ด้านล่างนี้คือ Flame Graph (จำลอง) สำหรับ CPU Profile ลองคลิกที่กล่องต่างๆ เพื่อดูคำอธิบายและค้นหาว่าคอขวด (Bottleneck) อยู่ที่ไหน</p>
+                    
+                    <div class="border-2 border-slate-300 rounded-lg p-4 bg-slate-50">
+                        <p class="text-center text-sm text-slate-500 mb-1">แกน Y: Stack (ล่างสุด -> บนสุด)</p>
+                        <div id="flame-graph-demo" class="flex flex-col-reverse gap-0.5" role="application">
+                            <!-- Level 1 (Bottom) -->
+                            <div class="flex h-7">
+                                <div class="flame-block bg-sky-200 w-full" data-info="นี่คือฟังก์ชัน 'main' ที่เป็นจุดเริ่มต้นของโปรแกรม สังเกตว่ามันกว้างเต็ม 100% เพราะทุกอย่างเริ่มจากที่นี่" title="main()">main()</div>
+                            </div>
+                            <!-- Level 2 -->
+                            <div class="flex h-7">
+                                <div class="flame-block bg-sky-300 w-[10%]" data-info="ฟังก์ชัน 'init()' ใช้ CPU 10% ของทั้งหมด อาจจะใช้สำหรับการตั้งค่าเริ่มต้น" title="init()">init()</div>
+                                <div class="flame-block bg-sky-300 w-[80%]" data-info="ฟังก์ชัน 'httpServer()' ใช้ CPU ถึง 80% ของทั้งหมด แสดงว่าเวลาส่วนใหญ่ของโปรแกรมถูกใช้ในการจัดการ HTTP request" title="httpServer()">httpServer()</div>
+                                <div class="flame-block bg-sky-300 w-[10%]" data-info="ฟังก์ชัน 'cleanup()' ใช้ CPU 10% อาจจะใช้สำหรับงานเบื้องหลัง" title="cleanup()">cleanup()</div>
+                            </div>
+                            <!-- Level 3 -->
+                            <div class="flex h-7">
+                                <div class="flame-block bg-transparent w-[10%] border-none"></div> <!-- Spacer -->
+                                <div class="flame-block bg-cyan-300 w-[70%]" data-info="'httpServer()' เรียก 'handleRequest()' ซึ่งใช้ CPU 70% (จาก 80% ของแม่) แสดงว่าการจัดการ request คือโหลดหลัก" title="handleRequest()">handleRequest()</div>
+                                <div class="flame-block bg-cyan-300 w-[10%]" data-info="'httpServer()' เรียก 'logMetrics()' ใช้ CPU แค่ 10% (จาก 80% ของแม่) ไม่ใช่ปัญหาใหญ่" title="logMetrics()">logMetrics()</div>
+                                <div class="flame-block bg-transparent w-[10%] border-none"></div> <!-- Spacer -->
+                            </div>
+                            <!-- Level 4 (The Problem) -->
+                            <div class="flex h-7">
+                                <div class="flame-block bg-transparent w-[10%] border-none"></div> <!-- Spacer -->
+                                <div class="flame-block bg-teal-300 w-[10%]" data-info="'handleRequest()' เรียก 'parseForm()' ใช้ CPU 10% (จาก 70% ของแม่) ดูสมเหตุสมผล" title="parseForm()">parseForm()</div>
+                                <div class="flame-block bg-red-400 w-[50%]" data-info="<strong class='text-red-800 text-lg'>พบแล้ว! (Bottleneck)</strong> 'handleRequest()' เรียก 'processData()' ซึ่งใช้ CPU ถึง 50% (จาก 70% ของแม่) นี่คือฟังก์ชันที่กว้างที่สุดในระดับบนๆ ของ Stack เราควรเริ่มวิเคราะห์และปรับปรุงประสิทธิภาพที่ฟังก์ชันนี้เป็นอันดับแรก!" title="processData()">processData()</div>
+                                <div class="flame-block bg-teal-300 w-[10%]" data-info="'handleRequest()' เรียก 'dbQuery()' ใช้ CPU 10% (จาก 70% ของแม่) ไม่ได้ช้ามาก" title="dbQuery()">dbQuery()</div>
+                                <div class="flame-block bg-transparent w-[20%] border-none"></div> <!-- Spacer -->
+                            </div>
+                             <!-- Level 5 (Top) -->
+                            <div class="flex h-7">
+                                <div class="flame-block bg-transparent w-[20%] border-none"></div> <!-- Spacer -->
+                                <div class="flame-block bg-red-300 w-[40%]" data-info="'processData()' เรียก 'calculate()' ซึ่งใช้ CPU 40% (จาก 50% ของแม่) โหลดหลักของ 'processData()' อยู่ที่นี่" title="calculate()">calculate()</div>
+                                <div class="flame-block bg-red-300 w-[10%]" data-info="'processData()' เรียก 'strings.Join()' ใช้ CPU 10% (จาก 50% ของแม่) อาจจะมีการต่อสตริงเยอะ" title="strings.Join()">strings.Join()</div>
+                                <div class="flame-block bg-transparent w-[30%] border-none"></div> <!-- Spacer -->
+                            </div>
+                        </div>
+                        <p class="text-center text-sm text-slate-500 mt-2">แกน X: สัดส่วนการใช้ CPU (ยิ่งกว้าง ยิ่งใช้เยอะ)</p>
+                    </div>
+
+                    <div id="flame-graph-explanation" class="mt-6 p-4 bg-slate-100 rounded-lg min-h-[100px] border border-slate-300 shadow-inner">
+                        <p class="text-slate-600 text-center font-medium">คลิกที่กล่องในกราฟด้านบนเพื่อดูคำอธิบายโดยละเอียด</p>
+                    </div>
+                </section>
+
+                <section id="commands" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">คำสั่ง pprof ที่ใช้บ่อย</h2>
+                    <p class="text-lg mb-4">เมื่อคุณอยู่ในโหมดโต้ตอบของ <code class="font-mono bg-slate-200 px-1 rounded">go tool pprof</code> นี่คือคำสั่งที่มีประโยชน์:</p>
+                    <ul class="list-none space-y-3">
+                        <li>
+                            <code class="font-mono bg-slate-800 text-white px-2 py-1 rounded">top</code>
+                            <p class="text-slate-700 pl-4">แสดง 10 ฟังก์ชันที่ใช้ทรัพยากรมากที่สุด</p>
+                        </li>
+                        <li>
+                            <code class="font-mono bg-slate-800 text-white px-2 py-1 rounded">list &lt;function_name&gt;</code>
+                            <p class="text-slate-700 pl-4">แสดงโค้ดทีละบรรทัดของฟังก์ชันที่ระบุ พร้อมบอกว่าบรรทัดไหนใช้ทรัพยากรเท่าไหร่ (มีประโยชน์มาก!)</p>
+                        </li>
+                        <li>
+                            <code class="font-mono bg-slate-800 text-white px-2 py-1 rounded">web</code>
+                            <p class="text-slate-700 pl-4">เปิด Call Graph (ไม่ใช่ Flame Graph) ในเว็บเบราว์เซอร์ (ต้องติดตั้ง Graphviz)</p>
+                        </li>
+                         <li>
+                            <code class="font-mono bg-slate-800 text-white px-2 py-1 rounded">http=:8080</code>
+                            <p class="text-slate-700 pl-4">(ใช้เป็น argument ตอนรัน) เปิด Web UI ของ pprof ที่พอร์ต 8080 ซึ่งมี Flame Graph ให้เลือกดูได้ทันที นี่คือวิธีที่แนะนำที่สุดในปัจจุบัน!</p>
+                        </li>
+                    </ul>
+                    <p class="text-lg mt-4"><strong>วิธีที่แนะนำที่สุด (Modern Way):</strong></p>
+                    <p class="text-lg mb-4">ใช้ Web UI ซึ่งมี Flame Graph ในตัวโดยอัตโนมัติ:</p>
+                    <div class="code-snippet mb-4">
+<pre><code># รันคำสั่งนี้ แล้วเปิด http://localhost:8081 ในเบราว์เซอร์
+go tool pprof -http=:8081 http://localhost:6060/debug/pprof/profile?seconds=30</code></pre>
+                    </div>
+                </section>
+
+                <section id="summary" class="scroll-mt-20 p-6 bg-white rounded-xl shadow-md mb-8">
+                    <h2 class="text-3xl font-semibold text-sky-700 mb-4">สรุป</h2>
+                    <p class="text-lg mb-4"><code class="font-mono bg-slate-200 px-1 rounded">pprof</code> เป็นเครื่องมือที่ขาดไม่ได้สำหรับนักพัฒนา Go ที่ต้องการสร้างแอปพลิเคชันประสิทธิภาพสูง Flame Graph ช่วยลดความซับซ้อนในการวิเคราะห์โปรไฟล์ ทำให้คุณสามารถ "เห็น" คอขวดได้ทันที</p>
+                    <p class="text-lg font-semibold">จำไว้ว่า: มองหากล่องที่ "กว้าง" ที่สุดใน Flame Graph นั่นคือจุดเริ่มต้นของการเพิ่มประสิทธิภาพของคุณ</p>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // --- Copy-to-Clipboard ---
+            document.querySelectorAll('.code-snippet').forEach(snippet => {
+                const code = snippet.querySelector('pre code');
+                if (!code) return;
+
+                const btn = document.createElement('button');
+                btn.classList.add('copy-btn');
+                btn.textContent = 'คัดลอก';
+                snippet.appendChild(btn);
+
+                btn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(code.innerText).then(() => {
+                        btn.textContent = 'คัดลอกแล้ว!';
+                        btn.classList.add('copied');
+                        setTimeout(() => {
+                            btn.textContent = 'คัดลอก';
+                            btn.classList.remove('copied');
+                        }, 2000);
+                    }).catch(err => {
+                        console.error('Failed to copy text: ', err);
+                    });
+                });
+            });
+
+            // --- Flame Graph Demo ---
+            const flameGraph = document.getElementById('flame-graph-demo');
+            const explanationBox = document.getElementById('flame-graph-explanation');
+            const flameBlocks = flameGraph.querySelectorAll('.flame-block');
+
+            flameBlocks.forEach(block => {
+                if (block.classList.contains('bg-transparent')) return;
+
+                block.addEventListener('click', () => {
+                    flameBlocks.forEach(b => b.classList.remove('active'));
+                    block.classList.add('active');
+                    
+                    const functionName = block.getAttribute('title') || 'Function';
+                    const info = block.dataset.info || 'ไม่มีข้อมูล';
+
+                    explanationBox.innerHTML = `
+                        <h4 class="text-xl font-bold text-sky-800 mb-2">${functionName}</h4>
+                        <p class="text-slate-700 text-base">${info}</p>
+                    `;
+                });
+            });
+
+            // --- Smooth Scrolling for Sidebar Nav ---
+            document.querySelectorAll('a.nav-link').forEach(anchor => {
+                anchor.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const href = this.getAttribute('href');
+                    const targetElement = document.querySelector(href);
+                    if (targetElement) {
+                        targetElement.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start'
+                        });
+                        
+                        document.querySelectorAll('a.nav-link').forEach(link => {
+                            link.classList.remove('text-sky-600', 'bg-sky-100');
+                            link.classList.add('text-slate-600');
+                        });
+                        this.classList.add('text-sky-600', 'bg-sky-100');
+                        this.classList.remove('text-slate-600');
+
+                        document.getElementById('nav-select').value = href.substring(1);
+                    }
+                });
+            });
+
+            // --- Mobile Navigation Select ---
+            const navSelect = document.getElementById('nav-select');
+            navSelect.addEventListener('change', (e) => {
+                const targetId = e.target.value;
+                const targetElement = document.getElementById(targetId);
+                if (targetElement) {
+                    targetElement.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+
+            // --- Update Active Nav on Scroll ---
+            const sections = document.querySelectorAll('main section');
+            const navLinks = document.querySelectorAll('a.nav-link');
+            const mobileSelect = document.getElementById('nav-select');
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                        const id = entry.target.id;
+                        navLinks.forEach(link => {
+                            link.classList.toggle('text-sky-600', link.getAttribute('href') === `#${id}`);
+                            link.classList.toggle('bg-sky-100', link.getAttribute('href') === `#${id}`);
+                            link.classList.toggle('text-slate-600', link.getAttribute('href') !== `#${id}`);
+                        });
+                        mobileSelect.value = id;
+                    }
+                });
+            }, { threshold: 0.5 });
+
+            sections.forEach(section => {
+                observer.observe(section);
+            });
+
+        });
+    </script>
+</body>
+</html>

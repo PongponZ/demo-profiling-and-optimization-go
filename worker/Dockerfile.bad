@@ -1,0 +1,35 @@
+# Multi-stage build for bad worker
+FROM golang:1.25-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum* ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o worker-bad ./cmd/worker-bad
+
+# Final stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /app
+
+# Copy the binary from builder
+COPY --from=builder /build/worker-bad .
+
+# Expose metrics port
+EXPOSE 9090
+
+# Run the binary
+CMD ["./worker-bad", "-tasks=50000", "-workers=20", "-data-size=200", "-duration=24h"]
+
