@@ -42,7 +42,7 @@ func main() {
 	rabbitMQURL := os.Getenv("RABBITMQ_URL")
 	rabbitMQQueue := os.Getenv("RABBITMQ_QUEUE")
 
-	rmq := libs.NewRabbitMQClient(rabbitMQURL, 100)
+	rmq := libs.NewRabbitMQClient(rabbitMQURL, 1000)
 	defer rmq.Close()
 
 	rmq.QueueDeclare(rabbitMQQueue)

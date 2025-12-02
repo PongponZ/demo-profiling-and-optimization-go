@@ -44,7 +44,7 @@ func main() {
 
 	config := readConfig()
 
-	rmq := libs.NewRabbitMQClient(config.RabbitMQURL, 100)
+	rmq := libs.NewRabbitMQClient(config.RabbitMQURL, 1000)
 	defer rmq.Close()
 
 	rmq.QueueDeclare(config.RabbitMQQueue)
