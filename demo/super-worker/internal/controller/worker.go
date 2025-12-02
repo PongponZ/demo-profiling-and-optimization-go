@@ -23,18 +23,17 @@ func NewWorker(maxWorker int, pokemonUsecase *usecase.PokemonUsecase, output *am
 }
 
 func (c *WorkerController) Start(messages <-chan amqp.Delivery) {
-	for i := 0; i < c.maxWorker; i++ {
-		go func() {
-			for message := range messages {
-				go c.processMessage(message)
+	for id := range c.maxWorker {
+		go func(workerID int) {
+			for m := range messages {
+				log.Println("worker ", workerID, " processing message ...")
+				go c.processMessage(m)
 			}
-		}()
+		}(id)
 	}
 }
 
 func (c *WorkerController) processMessage(message amqp.Delivery) {
-	log.Println("processing message ...")
-
 	var job Job
 	err := json.Unmarshal(message.Body, &job)
 	if err != nil {
@@ -43,7 +42,6 @@ func (c *WorkerController) processMessage(message amqp.Delivery) {
 	}
 
 	pokemon := c.pokemonUsecase.GeneratePokemon(job.Name)
-	log.Println("generating pokemon ...")
 
 	data, err := json.Marshal(pokemon)
 	if err != nil {
@@ -64,6 +62,4 @@ func (c *WorkerController) processMessage(message amqp.Delivery) {
 		log.Printf("error publishing message: %v", err)
 		return
 	}
-
-	log.Printf("published message ...")
 }
